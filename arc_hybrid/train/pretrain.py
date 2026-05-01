@@ -29,11 +29,19 @@ def gather_tasks(cfg) -> list[Task]:
     Missing paths are skipped silently — Colab notebooks may opt into a subset
     (e.g. ARC-AGI-2 only) by simply not downloading RE-ARC.
     """
+    # Both arcprize/ARC-AGI-2 and fchollet/ARC-AGI lay out JSONs under <repo>/data/{training,evaluation}.
+    # Keep the flattened paths too in case the user copies just the JSON folders.
+    arc2 = Path(cfg.data.arc_agi_2_path)
+    arc1 = Path(cfg.data.arc_agi_1_path)
     candidates = [
-        (Path(cfg.data.arc_agi_2_path) / "training", "*.json"),
-        (Path(cfg.data.arc_agi_2_path) / "evaluation", "*.json"),
-        (Path(cfg.data.arc_agi_1_path) / "training", "*.json"),
-        (Path(cfg.data.arc_agi_1_path) / "evaluation", "*.json"),
+        (arc2 / "data" / "training", "*.json"),
+        (arc2 / "data" / "evaluation", "*.json"),
+        (arc2 / "training", "*.json"),
+        (arc2 / "evaluation", "*.json"),
+        (arc1 / "data" / "training", "*.json"),
+        (arc1 / "data" / "evaluation", "*.json"),
+        (arc1 / "training", "*.json"),
+        (arc1 / "evaluation", "*.json"),
         (Path(cfg.data.re_arc_path), "*.json"),
     ]
     tasks: list[Task] = []
