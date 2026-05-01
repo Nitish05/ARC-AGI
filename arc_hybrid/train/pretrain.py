@@ -126,6 +126,13 @@ def main():
     torch.manual_seed(cfg.train.seed)
     rng = np.random.default_rng(cfg.train.seed)
 
+    # Hopper / Ampere matmul knobs. bf16 path is unaffected; this only nudges any
+    # fp32 fallbacks (norms, accumulators) onto TF32 tensor cores.
+    torch.set_float32_matmul_precision("high")
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        print(f"gpu: {gpu_name}")
+
     print("loading tasks...")
     tasks = gather_tasks(cfg)
     print(f"total {len(tasks)} tasks (filtered to max_grid={cfg.model.max_grid_size})")
@@ -135,6 +142,17 @@ def main():
     model = build_hybrid_from_config(cfg).to(args.device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"model params: {n_params/1e6:.1f}M")
+
+    # torch.compile gives a meaningful win on H100 by collapsing many small
+    # kernels (this model has lots of them — small CNN + per-cell gathers).
+    # max-autotune-no-cudagraphs picks best kernels per shape without the
+    # CUDA-graphs constraint that breaks dynamic-shape workloads like ours.
+    if args.device.startswith("cuda"):
+        try:
+            model = torch.compile(model, mode="max-autotune-no-cudagraphs")
+            print("torch.compile: enabled (mode=max-autotune-no-cudagraphs)")
+        except Exception as e:
+            print(f"torch.compile skipped: {e!r}")
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
