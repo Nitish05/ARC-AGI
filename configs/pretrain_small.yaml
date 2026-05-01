@@ -1,0 +1,37 @@
+# T4-friendly: ~30M params
+model:
+  d_model: 384
+  n_heads: 6
+  n_layers: 8
+  d_ff: 1536
+  cnn_channels: 64
+  cnn_blocks: 3
+  max_grid_size: 30
+  vocab_size: 16        # 10 colors + EOR + EOG + SEP + PAD + IN + OUT
+
+train:
+  steps: 50000
+  batch_tasks: 8
+  lr: 3.0e-4
+  lr_min: 3.0e-5
+  warmup_steps: 1000
+  weight_decay: 0.05
+  grad_clip: 1.0
+  precision: bf16
+  grad_checkpoint: true
+  seed: 0
+
+data:
+  arc_agi_2_path: data/raw/ARC-AGI-2
+  arc_agi_1_path: data/raw/ARC-AGI
+  re_arc_path: data/raw/re-arc
+  use_concept_arc: false
+  augment:
+    d8: true
+    color_perm: true
+    demo_dropout: true
+
+logging:
+  ckpt_every: 5000
+  log_every: 50
+  out_dir: runs/small

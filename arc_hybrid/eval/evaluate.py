@@ -1,0 +1,194 @@
+"""Greedy decoding + exact-match evaluation harness.
+
+Two-attempt submissions:
+    attempt_1 — TTA-voted (D8 majority vote)
+    attempt_2 — greedy without TTA (a separate failure mode for safety)
+
+A task is scored correct if either attempt exactly matches the ground-truth
+output grid for the first test pair. Outputs Kaggle-format JSON.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from ..data.arc_loader import Task
+from ..data.tokenize import (
+    EOG,
+    EOR,
+    ROLE_SPECIAL,
+    ROLE_TEST_OUT,
+    collate_batch,
+    pack_task,
+)
+from .voting import tta_predict
+
+
+@torch.no_grad()
+def greedy_decode(
+    model,
+    task: Task,
+    *,
+    test_idx: int = 0,
+    max_grid: int = 30,
+    device: str = "cuda",
+    max_new_tokens: int | None = None,
+) -> np.ndarray | None:
+    """Re-encode-each-step greedy decoding. Slow (quadratic) but simple. KV cache
+    is the natural follow-up if eval-time becomes a bottleneck."""
+    model.eval()
+    packed = pack_task(task, test_idx=test_idx, include_test_output=False, max_grid=max_grid)
+
+    grids_t = packed.grids.unsqueeze(0).to(device)
+    grid_sizes_t = packed.grid_sizes.unsqueeze(0).to(device)
+
+    tok = packed.token_ids.tolist()
+    row = packed.row_ids.tolist()
+    col = packed.col_ids.tolist()
+    role = packed.role_ids.tolist()
+    gis = packed.grid_in_sample.tolist()
+    cmask = packed.cell_mask.tolist()
+
+    rows: list[list[int]] = [[]]
+    cur_r, cur_c = 0, 0
+    if max_new_tokens is None:
+        max_new_tokens = max_grid * (max_grid + 1) + 1
+
+    for _ in range(max_new_tokens):
+        L = len(tok)
+        b = {
+            "token_ids": torch.tensor([tok], dtype=torch.long, device=device),
+            "row_ids": torch.tensor([row], dtype=torch.long, device=device),
+            "col_ids": torch.tensor([col], dtype=torch.long, device=device),
+            "role_ids": torch.tensor([role], dtype=torch.long, device=device),
+            "grid_in_sample": torch.tensor([gis], dtype=torch.long, device=device),
+            "cell_mask": torch.tensor([cmask], dtype=torch.bool, device=device),
+            "pad_mask": torch.ones(1, L, dtype=torch.bool, device=device),
+            "grids": grids_t,
+            "grid_sizes": grid_sizes_t,
+        }
+        logits = model(**b)
+        next_tok = int(logits[0, -1].argmax().item())
+
+        if next_tok == EOG:
+            break
+        if next_tok == EOR:
+            tok.append(EOR); row.append(cur_r); col.append(cur_c); role.append(ROLE_SPECIAL)
+            gis.append(-1); cmask.append(False)
+            cur_r += 1
+            cur_c = 0
+            if cur_r >= max_grid:
+                break
+            rows.append([])
+            continue
+        if 0 <= next_tok <= 9:
+            tok.append(next_tok); row.append(cur_r); col.append(cur_c); role.append(ROLE_TEST_OUT)
+            gis.append(-1); cmask.append(True)
+            rows[-1].append(next_tok)
+            cur_c += 1
+            if cur_c >= max_grid:
+                tok.append(EOR); row.append(cur_r); col.append(cur_c); role.append(ROLE_SPECIAL)
+                gis.append(-1); cmask.append(False)
+                cur_r += 1
+                cur_c = 0
+                if cur_r >= max_grid:
+                    break
+                rows.append([])
+            continue
+        break
+
+    while rows and not rows[-1]:
+        rows.pop()
+    if not rows:
+        return None
+    W = max(len(r) for r in rows)
+    if W == 0:
+        return None
+    out = np.zeros((len(rows), W), dtype=np.int8)
+    for ri, r in enumerate(rows):
+        out[ri, : len(r)] = r
+    return out
+
+
+def predict_two_attempts(model, task: Task, *, max_grid: int = 30, device: str = "cuda", n_aug: int = 8):
+    def gen(t: Task) -> np.ndarray | None:
+        return greedy_decode(model, t, max_grid=max_grid, device=device)
+
+    attempt_1 = tta_predict(gen, task, n_aug=n_aug)
+    attempt_2 = greedy_decode(model, task, max_grid=max_grid, device=device)
+    return attempt_1, attempt_2
+
+
+def _exact_match(pred: np.ndarray | None, target: np.ndarray) -> bool:
+    if pred is None:
+        return False
+    if pred.shape != target.shape:
+        return False
+    return bool((pred == target).all())
+
+
+def evaluate_split(
+    model,
+    tasks: list[Task],
+    *,
+    use_ttt: bool = False,
+    ttt_kwargs: dict | None = None,
+    max_grid: int = 30,
+    device: str = "cuda",
+    n_aug: int = 8,
+    out_dir: str | Path = "runs/eval",
+    tag: str = "ttt_off",
+) -> dict:
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if use_ttt:
+        from ..train.ttt import swap_transformer, train_ttt_adapter
+
+    submission: dict[str, list[dict]] = {}
+    per_task: dict[str, dict] = {}
+    n_correct = 0
+    n_total = 0
+    for task in tasks:
+        gt = task.test[0].output
+        if use_ttt:
+            adapter = train_ttt_adapter(model, task, max_grid=max_grid, device=device, **(ttt_kwargs or {}))
+            if adapter is None:
+                a1, a2 = predict_two_attempts(model, task, max_grid=max_grid, device=device, n_aug=n_aug)
+            else:
+                with swap_transformer(model, adapter):
+                    a1, a2 = predict_two_attempts(model, task, max_grid=max_grid, device=device, n_aug=n_aug)
+        else:
+            a1, a2 = predict_two_attempts(model, task, max_grid=max_grid, device=device, n_aug=n_aug)
+
+        correct = False
+        if gt is not None:
+            correct = _exact_match(a1, gt) or _exact_match(a2, gt)
+            n_total += 1
+            n_correct += int(correct)
+        per_task[task.task_id] = {
+            "correct": correct,
+            "shape_a1": None if a1 is None else list(a1.shape),
+            "shape_a2": None if a2 is None else list(a2.shape),
+        }
+        submission[task.task_id] = [
+            {
+                "attempt_1": [] if a1 is None else a1.astype(int).tolist(),
+                "attempt_2": [] if a2 is None else a2.astype(int).tolist(),
+            }
+        ]
+
+    summary = {
+        "tag": tag,
+        "n_total": n_total,
+        "n_correct": n_correct,
+        "accuracy": (n_correct / n_total) if n_total else 0.0,
+    }
+    (out_dir / f"summary_{tag}.json").write_text(json.dumps(summary, indent=2))
+    (out_dir / f"per_task_{tag}.json").write_text(json.dumps(per_task, indent=2))
+    (out_dir / f"submission_{tag}.json").write_text(json.dumps(submission, indent=2))
+    print(f"[{tag}] {n_correct}/{n_total} correct ({summary['accuracy']:.3f})")
+    return summary

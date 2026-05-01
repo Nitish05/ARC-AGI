@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+
+# data + checkpoints (kept out of git)
+data/raw/
+data/cache/
+runs/
+*.ckpt
+*.pt
+*.safetensors
+
+# notebook outputs
+.ipynb_checkpoints/
+
+# editor
+.idea/
+.vscode/
+.DS_Store
