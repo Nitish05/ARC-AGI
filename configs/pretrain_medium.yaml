@@ -1,5 +1,6 @@
-# H100/A100-80GB: ~38M params (was labelled ~80M but actual count is ~38M).
-# On A100-40GB you may need batch_tasks=16 and grad_checkpoint=true.
+# A100-40GB: ~38M params. Fits with batch_tasks=16 + grad_checkpoint=true.
+# On A100-80GB / H100 / G4 you can bump batch_tasks to 32 and turn checkpointing off
+# (and scale lr to 4e-4 to match the doubled batch).
 model:
   d_model: 512
   n_heads: 8
@@ -12,14 +13,14 @@ model:
 
 train:
   steps: 100000
-  batch_tasks: 32        # H100 has 80GB; 32 fits comfortably without checkpointing
-  lr: 4.0e-4             # sqrt-scaled from 3e-4@bs=16 -> bs=32
-  lr_min: 4.0e-5
+  batch_tasks: 16        # A100-40GB ceiling with grad_checkpoint=true
+  lr: 3.0e-4
+  lr_min: 3.0e-5
   warmup_steps: 2000
   weight_decay: 0.05
   grad_clip: 1.0
   precision: bf16
-  grad_checkpoint: false # H100 has memory headroom; checkpointing costs ~30% throughput
+  grad_checkpoint: true  # required on A100-40GB; trades ~30% throughput for activation memory
   seed: 0
 
 data:
