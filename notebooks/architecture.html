@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ARC-AGI-2 Hybrid CNN+Transformer — Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0e1a;
+    --bg-grid:#0d1220;
+    --panel:#111a2e;
+    --panel-2:#152138;
+    --panel-3:#1b2a47;
+    --line:#243352;
+    --line-strong:#34507e;
+    --text:#e6ecff;
+    --text-2:#a5b4d8;
+    --muted:#6b7da3;
+    --cyan:#22d3ee;
+    --cyan-dim:rgba(34,211,238,.18);
+    --amber:#f59e0b;
+    --amber-dim:rgba(245,158,11,.18);
+    --green:#34d399;
+    --rose:#fb7185;
+    --violet:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Inter',ui-sans-serif,system-ui,sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  body{
+    background-image:
+      radial-gradient(1200px 800px at 0% 0%, rgba(34,211,238,.05), transparent 50%),
+      radial-gradient(1000px 700px at 100% 0%, rgba(245,158,11,.05), transparent 60%),
+      linear-gradient(var(--bg-grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--bg-grid) 1px,transparent 1px);
+    background-size: auto, auto, 32px 32px, 32px 32px;
+    background-position: 0 0, 0 0, -1px -1px, -1px -1px;
+  }
+  .mono{font-family:'Space Mono',ui-monospace,Menlo,monospace}
+  .mute{color:var(--muted)}
+  .dim{color:var(--text-2)}
+  a{color:var(--cyan);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  .page{max-width:1320px;margin:0 auto;padding:32px 28px 96px}
+
+  /* HEADER */
+  header.hero{
+    display:grid;grid-template-columns:1.4fr 1fr;gap:18px;
+    margin-bottom:28px;
+  }
+  .title-card,.summary-card{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;
+    box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 24px 60px -32px rgba(0,0,0,.7);
+  }
+  .eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);margin-bottom:6px}
+  h1{margin:0 0 6px 0;font-size:26px;letter-spacing:-.01em;font-weight:700}
+  .sub{color:var(--text-2);font-size:13px;max-width:64ch}
+  .config-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+  .badge{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--panel-2);border:1px solid var(--line);
+    padding:5px 9px;border-radius:8px;font-family:'Space Mono',monospace;font-size:11.5px;color:var(--text-2)
+  }
+  .badge b{color:var(--text);font-weight:700}
+  .badge.cyan{border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.06);color:#bdeefb}
+  .badge.amber{border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.06);color:#fde0a8}
+
+  .summary-card{display:flex;flex-direction:column;justify-content:center}
+  .summary-card .total{font-family:'Space Mono',monospace;font-size:42px;letter-spacing:-.02em;color:var(--text)}
+  .summary-card .total small{font-size:14px;color:var(--muted);margin-left:6px;letter-spacing:0}
+  .breakdown{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 18px;margin-top:14px}
+  .row{display:flex;justify-content:space-between;font-family:'Space Mono',monospace;font-size:12px;border-bottom:1px dashed var(--line);padding:5px 0}
+  .row .k{color:var(--text-2)} .row .v{color:var(--text)}
+
+  /* BENTO GRID */
+  .bento{
+    display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:minmax(60px,auto);gap:14px;
+  }
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;
+    transition:border-color .2s ease, transform .2s ease;
+  }
+  .card:hover{border-color:var(--line-strong)}
+  .card h3{margin:0 0 4px 0;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--cyan)}
+  .card .sec-meta{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:10px}
+  .card.span-3{grid-column:span 3}.card.span-4{grid-column:span 4}.card.span-5{grid-column:span 5}
+  .card.span-6{grid-column:span 6}.card.span-7{grid-column:span 7}.card.span-8{grid-column:span 8}
+  .card.span-9{grid-column:span 9}.card.span-12{grid-column:span 12}
+
+  /* SHAPE PILL */
+  .shape{
+    display:inline-block;font-family:'Space Mono',monospace;font-size:11.5px;
+    background:rgba(34,211,238,.08);color:#9beaf5;border:1px solid rgba(34,211,238,.25);
+    padding:3px 8px;border-radius:6px;letter-spacing:0
+  }
+  .shape.amber{background:rgba(245,158,11,.08);color:#fdd58c;border-color:rgba(245,158,11,.3)}
+  .shape.muted{background:transparent;color:var(--muted);border-color:var(--line)}
+
+  /* LAYER ROW */
+  .layer{
+    display:grid;grid-template-columns:1fr auto;gap:8px 14px;align-items:center;
+    padding:10px 12px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+    margin-top:8px
+  }
+  .layer .name{font-family:'Space Mono',monospace;font-size:12.5px;color:var(--text)}
+  .layer .name .accent{color:var(--cyan)}
+  .layer .name .accent-amber{color:var(--amber)}
+  .layer .meta{font-family:'Space Mono',monospace;font-size:11px;color:var(--text-2);text-align:right;white-space:nowrap}
+  .layer .desc{grid-column:1 / -1;color:var(--muted);font-size:12px;margin-top:2px}
+  .layer.lora{border-color:rgba(245,158,11,.35);background:linear-gradient(180deg,rgba(245,158,11,.04),transparent 70%) , var(--panel-2)}
+
+  /* RESBLOCK */
+  .resblock{
+    border:1px dashed var(--line-strong);border-radius:10px;padding:8px 10px;margin-top:8px;
+    background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(34,211,238,.025) 6px 12px),var(--panel-2)
+  }
+  .resblock .rb-title{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--text-2);display:flex;justify-content:space-between;margin-bottom:6px}
+  .resblock .mini{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--text);padding:5px 8px;border-radius:6px;background:var(--panel-3);border:1px solid var(--line);margin-bottom:5px;display:flex;justify-content:space-between}
+  .resblock .mini .pn{color:var(--text-2)}
+  .resblock .skip{font-size:10.5px;color:var(--cyan);font-family:'Space Mono',monospace;margin-top:4px;text-align:center}
+
+  /* FUSION */
+  .fusion{
+    background:linear-gradient(180deg,rgba(34,211,238,.08),rgba(34,211,238,0)) ,var(--panel);
+    border:1px solid rgba(34,211,238,.35);border-radius:14px;padding:18px;
+    text-align:center;
+  }
+  .fusion h3{color:var(--cyan);margin:0 0 6px}
+  .fusion .formula{
+    font-family:'Space Mono',monospace;font-size:14px;color:var(--text);
+    background:var(--panel-2);border:1px solid var(--line);border-radius:8px;display:inline-block;
+    padding:8px 14px;margin-top:6px
+  }
+  .fusion .formula .accent{color:var(--cyan)}
+  .fusion .formula .accent-amber{color:var(--amber)}
+  .fusion .note{margin-top:10px;color:var(--text-2);font-size:12px;max-width:720px;margin-left:auto;margin-right:auto}
+
+  /* TRANSFORMER STACK */
+  .stack{
+    display:flex;flex-direction:column;gap:6px
+  }
+  .stack .tier{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:7px 12px;border-radius:8px;
+    font-family:'Space Mono',monospace;font-size:11.5px;
+    background:var(--panel-2);border:1px solid var(--line);color:var(--text-2)
+  }
+  .stack .tier b{color:var(--text);font-weight:700}
+  .stack .tier.dim{opacity:.55}
+  .stack .ellipsis{text-align:center;color:var(--muted);font-family:'Space Mono',monospace;font-size:10px;padding:4px 0}
+
+  /* BLOCK DETAIL */
+  .block-detail{
+    border:1px solid var(--line);border-radius:14px;padding:16px;background:var(--panel);
+    display:flex;flex-direction:column;gap:8px
+  }
+  .block-detail .arrow{
+    text-align:center;color:var(--muted);font-family:'Space Mono',monospace;font-size:14px;height:14px
+  }
+  .resconnect{
+    border:1px dashed var(--line-strong);border-radius:10px;padding:10px;background:var(--panel-2)
+  }
+  .resconnect .rc-title{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--text-2);margin-bottom:8px;display:flex;justify-content:space-between}
+
+  /* INFO CARD */
+  .info{
+    border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:16px 18px
+  }
+  .info h3{color:var(--cyan)}
+  .info.amber h3{color:var(--amber)}
+  .info p{margin:6px 0 0 0;color:var(--text-2);font-size:12.5px}
+  .info code{font-family:'Space Mono',monospace;color:var(--text);background:var(--panel-2);border:1px solid var(--line);padding:1px 5px;border-radius:4px;font-size:11.5px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-top:8px;font-family:'Space Mono',monospace;font-size:11.5px}
+  .kv .k{color:var(--text-2)} .kv .v{color:var(--text)}
+
+  /* TRAINING / EVAL FLOW */
+  .flow{
+    display:grid;grid-template-columns:repeat(7,1fr) auto;gap:10px;align-items:center
+  }
+  .flow .step{
+    border:1px solid var(--line);background:var(--panel-2);border-radius:10px;padding:10px;text-align:center;
+    font-family:'Space Mono',monospace;font-size:11px;color:var(--text-2)
+  }
+  .flow .step b{display:block;color:var(--text);font-size:12px;margin-bottom:3px;font-weight:700}
+  .flow .arrow{color:var(--muted);font-family:'Space Mono',monospace;text-align:center}
+
+  /* LORA HIGHLIGHT */
+  .lora-tag{
+    display:inline-flex;align-items:center;gap:4px;font-family:'Space Mono',monospace;font-size:10px;
+    background:var(--amber-dim);color:var(--amber);border:1px solid rgba(245,158,11,.4);
+    padding:1px 6px;border-radius:4px;letter-spacing:.04em;text-transform:uppercase;font-weight:700
+  }
+
+  /* GRID-FLOW DIVIDER */
+  .merge-arrows{
+    display:flex;justify-content:center;align-items:center;gap:8px;color:var(--muted);
+    font-family:'Space Mono',monospace;font-size:11px;height:34px
+  }
+  .merge-arrows .arr{font-size:18px;color:var(--cyan)}
+
+  /* FOOTER */
+  footer{
+    margin-top:36px;color:var(--muted);font-family:'Space Mono',monospace;font-size:11px;
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 1100px){
+    header.hero{grid-template-columns:1fr}
+    .card.span-3,.card.span-4,.card.span-5,.card.span-6,.card.span-7,.card.span-8,.card.span-9{grid-column:span 12}
+    .flow{grid-template-columns:repeat(2,1fr);}
+    .flow .arrow{display:none}
+  }
+
+  /* PRINT */
+  @media print{
+    body{background:#fff;color:#0b0f1c}
+    .card,.info,.summary-card,.title-card,.fusion,.block-detail,.layer,.resblock,.flow .step,.stack .tier{
+      background:#fff !important;color:#0b0f1c !important;border-color:#cfd6e6 !important;box-shadow:none !important
+    }
+    .badge,.shape,.lora-tag{background:#f1f5f9 !important;color:#0b0f1c !important;border-color:#cfd6e6 !important}
+    .eyebrow,.card h3,.fusion h3,.info h3{color:#0e7490 !important}
+  }
+
+  /* a11y */
+  :focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:6px}
+  @media (prefers-reduced-motion:reduce){*{transition:none !important}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <header class="hero">
+    <div class="title-card">
+      <div class="eyebrow">Architecture · Figure 1</div>
+      <h1>Hybrid CNN + Causal Transformer with TTT-LoRA</h1>
+      <div class="sub">A small from-scratch decoder-only transformer with a per-cell CNN spatial encoder, fused as input embeddings. At evaluation time, a fresh LoRA adapter is injected on the transformer per task and trained on the demonstration pairs (test-time training).</div>
+      <div class="config-row">
+        <span class="badge">config <b>pretrain_medium.yaml</b></span>
+        <span class="badge">d_model <b>512</b></span>
+        <span class="badge">n_heads <b>8</b> · head_dim <b>64</b></span>
+        <span class="badge">n_layers <b>12</b></span>
+        <span class="badge">d_ff <b>2048</b></span>
+        <span class="badge">cnn_channels <b>96</b></span>
+        <span class="badge">cnn_blocks <b>4</b></span>
+        <span class="badge">max_grid <b>30</b></span>
+        <span class="badge">vocab_size <b>16</b></span>
+        <span class="badge cyan">precision <b>bf16</b></span>
+        <span class="badge cyan">attn <b>F.scaled_dot_product_attention</b></span>
+      </div>
+    </div>
+    <div class="summary-card">
+      <div class="eyebrow">Total trainable parameters</div>
+      <div class="total">38.6<small>M</small></div>
+      <div class="breakdown">
+        <div class="row"><span class="k">CNN encoder</span><span class="v">0.67M (1.7%)</span></div>
+        <div class="row"><span class="k">cnn_to_d (Linear)</span><span class="v">0.05M (0.1%)</span></div>
+        <div class="row"><span class="k">Token embeddings</span><span class="v">0.06M (0.2%)</span></div>
+        <div class="row"><span class="k">Transformer (×12)</span><span class="v">37.80M (97.9%)</span></div>
+        <div class="row"><span class="k">Final LayerNorm</span><span class="v">1,024 (0.0%)</span></div>
+        <div class="row"><span class="k">LM head</span><span class="v">8,192 (0.0%)</span></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- INPUTS -->
+  <section class="bento" style="margin-bottom:14px">
+
+    <!-- INPUT: GRID TENSOR -->
+    <div class="card span-6">
+      <h3>Input · Grid Tensor</h3>
+      <div class="sec-meta">CNN-visible color matrices · padded with PAD=10</div>
+      <div class="layer">
+        <div class="name">grids</div>
+        <div class="meta"><span class="shape">[B, G, 30, 30]</span> · <span class="mute">long</span></div>
+        <div class="desc">All CNN-visible grids in a task: demo inputs, demo outputs, test input. During training the test output is intentionally <b>not</b> in this tensor.</div>
+      </div>
+      <div class="layer">
+        <div class="name">grid_sizes</div>
+        <div class="meta"><span class="shape">[B, G, 2]</span> · <span class="mute">long (H, W)</span></div>
+        <div class="desc mute">Real shapes per grid (unused by forward; PAD masking handles padded cells).</div>
+      </div>
+    </div>
+
+    <!-- INPUT: TOKEN SEQUENCE -->
+    <div class="card span-6">
+      <h3>Input · Token Sequence</h3>
+      <div class="sec-meta">Raster-serialized cells + structural specials</div>
+      <div class="layer">
+        <div class="name">token_ids</div>
+        <div class="meta"><span class="shape">[B, L]</span> · <span class="mute">vocab=16</span></div>
+        <div class="desc">0–9 colors · 10=PAD · 11=EOR · 12=EOG · 13=SEP · 14=IN · 15=OUT</div>
+      </div>
+      <div class="layer">
+        <div class="name">row_ids · col_ids</div>
+        <div class="meta"><span class="shape">[B, L]</span> · <span class="mute">range 0..30</span></div>
+        <div class="desc mute">2-D position; index <code class="mono">30</code> is the “not-a-cell” sentinel for specials.</div>
+      </div>
+      <div class="layer">
+        <div class="name">role_ids</div>
+        <div class="meta"><span class="shape">[B, L]</span> · <span class="mute">5 roles</span></div>
+        <div class="desc mute">DEMO_IN · DEMO_OUT · TEST_IN · TEST_OUT · SPECIAL</div>
+      </div>
+      <div class="layer">
+        <div class="name">grid_in_sample</div>
+        <div class="meta"><span class="shape">[B, L]</span> · <span class="mute">int, −1 = none</span></div>
+        <div class="desc mute">Index into the <code class="mono">grids</code> tensor for cell positions; <code class="mono">−1</code> for specials and CNN-blind cells.</div>
+      </div>
+      <div class="layer">
+        <div class="name">cell_mask · pad_mask · target_mask</div>
+        <div class="meta"><span class="shape">[B, L]</span> · <span class="mute">bool</span></div>
+        <div class="desc mute"><code class="mono">cell_mask</code>: True iff the position is a color cell. <code class="mono">pad_mask</code>: True iff real (not padded). <code class="mono">target_mask</code>: True iff position contributes to loss (test output cells only).</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BRANCHES -->
+  <section class="bento" style="margin-bottom:14px">
+
+    <!-- CNN BRANCH -->
+    <div class="card span-6">
+      <h3>CNN Spatial Encoder · 0.67M params</h3>
+      <div class="sec-meta">Bidirectional, per-grid, no temporal mask · Receptive field 17×17 after 4 blocks</div>
+
+      <div class="layer">
+        <div class="name"><span class="accent">color_embed</span> <span class="dim">= nn.Embedding(16, 96)</span></div>
+        <div class="meta">1,536 · <span class="shape">[B·G, 30, 30, 96]</span></div>
+        <div class="desc mute">Lookup → permute to <code class="mono">[B·G, 96, 30, 30]</code> for 2-D conv.</div>
+      </div>
+
+      <!-- ResBlock template ×4 -->
+      <div class="resblock">
+        <div class="rb-title"><span>ResBlock × 4</span><span>166,464 params each · 665,856 total</span></div>
+        <div class="mini"><span>Conv2d(96 → 96, k=3, p=1)</span><span class="pn">83,040</span></div>
+        <div class="mini"><span>GroupNorm(8 groups, 96 ch)</span><span class="pn">192</span></div>
+        <div class="mini"><span>GELU</span><span class="pn">—</span></div>
+        <div class="mini"><span>Conv2d(96 → 96, k=3, p=1)</span><span class="pn">83,040</span></div>
+        <div class="mini"><span>GroupNorm</span><span class="pn">192</span></div>
+        <div class="skip">↳ residual: <code class="mono">return GELU(x + h)</code></div>
+      </div>
+
+      <div class="layer">
+        <div class="name">cnn_feats</div>
+        <div class="meta"><span class="shape">[B·G, 96, 30, 30]</span></div>
+        <div class="desc mute">Reshaped to <code class="mono">[B, G, 30, 30, 96]</code>, then per-cell features are gathered into the sequence positions.</div>
+      </div>
+
+      <div class="layer">
+        <div class="name"><span class="accent">cnn_to_d</span> <span class="dim">= nn.Linear(96 → 512)</span></div>
+        <div class="meta">49,664 · <span class="shape">[B, L, 512]</span></div>
+        <div class="desc mute">Projects gathered CNN features into the transformer's <code class="mono">d_model=512</code>.</div>
+      </div>
+    </div>
+
+    <!-- TOKEN EMBEDDING BRANCH -->
+    <div class="card span-6">
+      <h3>Token + Position + Role Embeddings · 0.06M params</h3>
+      <div class="sec-meta">Five additive embedding tables, then LayerNorm</div>
+
+      <div class="layer">
+        <div class="name"><span class="accent">token_embed</span> <span class="dim">= nn.Embedding(16, 512)</span></div>
+        <div class="meta">8,192 · <span class="shape">[B, L, 512]</span></div>
+      </div>
+      <div class="layer">
+        <div class="name"><span class="accent">row_embed</span> <span class="dim">= nn.Embedding(31, 512)</span></div>
+        <div class="meta">15,872</div>
+        <div class="desc mute">31 = max_grid + 1 (slot 30 = "not a cell").</div>
+      </div>
+      <div class="layer">
+        <div class="name"><span class="accent">col_embed</span> <span class="dim">= nn.Embedding(31, 512)</span></div>
+        <div class="meta">15,872</div>
+      </div>
+      <div class="layer">
+        <div class="name"><span class="accent">role_embed</span> <span class="dim">= nn.Embedding(5, 512)</span></div>
+        <div class="meta">2,560</div>
+        <div class="desc mute">DEMO_IN · DEMO_OUT · TEST_IN · TEST_OUT · SPECIAL</div>
+      </div>
+      <div class="layer">
+        <div class="name"><span class="accent">grid_idx_embed</span> <span class="dim">= nn.Embedding(33, 512)</span></div>
+        <div class="meta">16,896</div>
+        <div class="desc mute">Index 0 reserved for "not in any grid"; real grids are 1..32.</div>
+      </div>
+      <div class="layer">
+        <div class="name">∑ embeddings → <span class="accent">LayerNorm(512)</span></div>
+        <div class="meta">1,024 · <span class="shape">[B, L, 512]</span></div>
+        <div class="desc mute">Sum of all five lookups, then normalize.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MERGE ARROWS -->
+  <div class="merge-arrows" aria-hidden="true">
+    <span class="arr">↘</span>
+    <span>concat at per-cell positions</span>
+    <span class="arr">↙</span>
+  </div>
+
+  <!-- FUSION -->
+  <section class="bento" style="margin-bottom:14px">
+    <div class="card span-12 fusion">
+      <h3>Fusion · per-cell additive merge</h3>
+      <div class="formula">
+        <span class="dim">x =</span> embeddings <span class="dim">+</span>
+        <span class="accent">cnn_to_d</span><span class="dim">(</span>gathered_cnn_features<span class="dim">)</span> <span class="dim">·</span>
+        <span class="accent-amber">cnn_lookup_mask</span>
+      </div>
+      <div class="note">
+        For non-cell tokens (specials, padding) and for cells whose grid was hidden from the CNN (the test output during training, marked with <code class="mono">grid_in_sample = −1</code>), the CNN contribution is masked to zero. Only the embedding stream carries information at those positions. <span class="dim">Output shape: <span class="shape">[B, L, 512]</span></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRANSFORMER -->
+  <section class="bento" style="margin-bottom:14px">
+
+    <!-- BLOCK STACK (left) -->
+    <div class="card span-4">
+      <h3>Causal Transformer Stack</h3>
+      <div class="sec-meta">12 decoder blocks · 37.8M params · grad checkpoint configurable</div>
+      <div class="stack">
+        <div class="tier"><b>Block 12</b><span>3.15M</span></div>
+        <div class="tier"><b>Block 11</b><span>3.15M</span></div>
+        <div class="tier dim"><b>Block 10</b><span>3.15M</span></div>
+        <div class="tier dim"><b>Block 9</b><span>3.15M</span></div>
+        <div class="ellipsis">⋮</div>
+        <div class="tier dim"><b>Block 4</b><span>3.15M</span></div>
+        <div class="tier dim"><b>Block 3</b><span>3.15M</span></div>
+        <div class="tier"><b>Block 2</b><span>3.15M</span></div>
+        <div class="tier" style="border-color:var(--cyan);background:rgba(34,211,238,.06)"><b style="color:var(--cyan)">Block 1 (expanded →)</b><span>3.15M</span></div>
+      </div>
+      <div class="layer" style="margin-top:14px">
+        <div class="name">Final LayerNorm(512)</div>
+        <div class="meta">1,024</div>
+      </div>
+    </div>
+
+    <!-- BLOCK DETAIL (right) -->
+    <div class="card span-8 block-detail">
+      <h3>Block · 3,150,336 params</h3>
+      <div class="sec-meta">Pre-norm transformer block · LayerNorm → Attention → +residual → LayerNorm → MLP → +residual</div>
+
+      <div class="resconnect">
+        <div class="rc-title"><span>Sublayer 1 · Multi-Head Self-Attention</span><span>1,049,600 params</span></div>
+        <div class="layer">
+          <div class="name">norm1 = <span class="accent">LayerNorm(512)</span></div>
+          <div class="meta">1,024</div>
+        </div>
+        <div class="layer lora">
+          <div class="name">attn.<span class="accent-amber">q_proj</span> = nn.Linear(512, 512, bias=False) <span class="lora-tag">LoRA target</span></div>
+          <div class="meta">262,144</div>
+        </div>
+        <div class="layer">
+          <div class="name">attn.<span class="accent">k_proj</span> = nn.Linear(512, 512, bias=False)</div>
+          <div class="meta">262,144</div>
+        </div>
+        <div class="layer lora">
+          <div class="name">attn.<span class="accent-amber">v_proj</span> = nn.Linear(512, 512, bias=False) <span class="lora-tag">LoRA target</span></div>
+          <div class="meta">262,144</div>
+        </div>
+        <div class="layer">
+          <div class="name"><span class="accent">F.scaled_dot_product_attention</span>(q, k, v, attn_mask, is_causal=False)</div>
+          <div class="meta"><span class="shape">[B, 8, L, 64]</span></div>
+          <div class="desc mute">Causal + key-padding additive mask built per batch (<code class="mono">−inf</code> on blocked positions). 8 heads × head_dim 64 = 512.</div>
+        </div>
+        <div class="layer">
+          <div class="name">attn.<span class="accent">o_proj</span> = nn.Linear(512, 512, bias=False)</div>
+          <div class="meta">262,144</div>
+        </div>
+        <div class="layer">
+          <div class="name">+ residual <span class="dim">(skip from input of sublayer)</span></div>
+          <div class="meta"><span class="shape">[B, L, 512]</span></div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="resconnect">
+        <div class="rc-title"><span>Sublayer 2 · MLP (2-layer GELU)</span><span>2,100,736 params</span></div>
+        <div class="layer">
+          <div class="name">norm2 = <span class="accent">LayerNorm(512)</span></div>
+          <div class="meta">1,024</div>
+        </div>
+        <div class="layer lora">
+          <div class="name">mlp.<span class="accent-amber">up_proj</span> = nn.Linear(512, 2048) <span class="lora-tag">LoRA target</span></div>
+          <div class="meta">1,050,624</div>
+        </div>
+        <div class="layer">
+          <div class="name"><span class="accent">GELU</span></div>
+          <div class="meta">—</div>
+        </div>
+        <div class="layer lora">
+          <div class="name">mlp.<span class="accent-amber">down_proj</span> = nn.Linear(2048, 512) <span class="lora-tag">LoRA target</span></div>
+          <div class="meta">1,049,088</div>
+        </div>
+        <div class="layer">
+          <div class="name">+ residual</div>
+          <div class="meta"><span class="shape">[B, L, 512]</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LM HEAD -->
+  <section class="bento" style="margin-bottom:14px">
+    <div class="card span-12">
+      <h3>Output · LM Head</h3>
+      <div class="sec-meta">Linear projection to vocab + softmax</div>
+      <div class="layer">
+        <div class="name">lm_head = <span class="accent">nn.Linear(512, 16, bias=False)</span></div>
+        <div class="meta">8,192 · <span class="shape">[B, L, 16]</span></div>
+        <div class="desc mute">During training: cross-entropy on shifted targets at positions where <code class="mono">target_mask=True</code>. During greedy decode: argmax at the last position; emit one token at a time and stop on <code class="mono">EOG</code>.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INFO PANELS -->
+  <section class="bento" style="margin-bottom:14px">
+
+    <div class="card span-6 info">
+      <h3>The CNN-blind-on-test-output trick</h3>
+      <p>
+        During training, the test pair's output cells are added to the token sequence (so the LM head has loss targets) but are <b>not</b> placed in the <code>grids</code> tensor that the CNN sees. They get <code>grid_in_sample = −1</code>, and the hybrid forward zeroes their CNN contribution via:
+      </p>
+      <div class="kv">
+        <span class="k">cnn_lookup</span>
+        <span class="v">= cell_mask & (grid_in_sample &gt;= 0)</span>
+        <span class="k">gathered</span>
+        <span class="v">= gathered * cnn_lookup.unsqueeze(-1)</span>
+      </div>
+      <p>
+        Without this asymmetry, teacher-forcing would let the model peek at the answer through the CNN branch. The transformer's causal mask is necessary but not sufficient — the spatial encoder needs its own gate.
+      </p>
+    </div>
+
+    <div class="card span-6 info amber">
+      <h3>TTT-LoRA · per-task adapter at evaluation time</h3>
+      <p>
+        Per evaluation task, <code>peft.inject_adapter_in_model</code> injects a fresh LoRA adapter onto a deepcopy of the transformer. CNN, embeddings, and LM head are frozen. The adapter trains for 100 AdamW steps on 64 leave-one-out + D8 + color-perm augmented examples drawn from the task's demonstration pairs, then is swapped into the base model for two-attempt inference (TTA-voted greedy + plain greedy). The adapter is discarded after the task.
+      </p>
+      <div class="kv">
+        <span class="k">target_modules</span>
+        <span class="v">("q_proj", "v_proj", "up_proj", "down_proj")</span>
+        <span class="k">r</span><span class="v">8</span>
+        <span class="k">alpha</span><span class="v">16</span>
+        <span class="k">dropout</span><span class="v">0.05</span>
+        <span class="k">trainable</span><span class="v">~0.6M params per task adapter</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- FLOW -->
+  <section class="bento" style="margin-bottom:14px">
+    <div class="card span-12">
+      <h3>Forward flow · training step</h3>
+      <div class="sec-meta">grids → CNN → fuse → causal transformer → LM head → CE on test-output positions</div>
+      <div class="flow">
+        <div class="step"><b>grids</b><span class="shape muted">[B,G,30,30]</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><b>CNN encoder</b><span class="shape muted">[B,G,30,30,96]</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><b>cnn_to_d</b><span class="shape muted">[B,L,512]</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><b>+ embeddings</b><span class="shape muted">[B,L,512]</span></div>
+        <div class="arrow">→</div>
+      </div>
+      <div class="flow" style="margin-top:10px">
+        <div class="step"><b>12× Block</b><span class="shape muted">[B,L,512]</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><b>final LN</b><span class="shape muted">[B,L,512]</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><b>lm_head</b><span class="shape muted">[B,L,16]</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><b>CE loss</b><span class="shape muted">target_mask only</span></div>
+        <div class="arrow">→</div>
+        <div class="step" style="border-color:var(--cyan);background:rgba(34,211,238,.08);color:var(--text)"><b>backward</b><span class="shape">grad → all params</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRAINING vs EVAL -->
+  <section class="bento" style="margin-bottom:14px">
+
+    <div class="card span-6 info">
+      <h3>Training (pretrain)</h3>
+      <p class="dim mono" style="font-size:11.5px">configs/pretrain_medium.yaml · 100,000 steps · batch_tasks 32 (H100/G4) · bf16 · AdamW (β=(0.9, 0.95), wd=0.05) · cosine LR with 2,000 warmup steps · grad_clip 1.0</p>
+      <div class="kv">
+        <span class="k">corpus</span><span class="v">ARC-AGI-2/training (1,000) + ARC-AGI/training (400) + ARC-AGI/evaluation (400) = 1,800 tasks</span>
+        <span class="k">held out</span><span class="v">ARC-AGI-2/evaluation (120 tasks) — never seen during training</span>
+        <span class="k">augmentation</span><span class="v">D8 (×8) · color permutation (×9!=362,880) · demo dropout · LOO target selection</span>
+        <span class="k">loss</span><span class="v">CE on test-output cell tokens only</span>
+      </div>
+    </div>
+
+    <div class="card span-6 info amber">
+      <h3>Evaluation (TTT)</h3>
+      <p class="dim mono" style="font-size:11.5px">notebooks/02_ttt_eval_colab.ipynb · per-task LoRA adapter · TTA-voted two-attempt submission</p>
+      <div class="kv">
+        <span class="k">per task</span><span class="v">deepcopy(transformer) → inject LoRA → train 100 steps → swap into base model</span>
+        <span class="k">examples/task</span><span class="v">64 (LOO + D8 + color_perm; demo_dropout off)</span>
+        <span class="k">decode</span><span class="v">attempt_1: D8 majority vote (n_aug=8) · attempt_2: plain greedy</span>
+        <span class="k">scoring</span><span class="v">exact-match on test pair output (Kaggle JSON format)</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Source · arc_hybrid/model/{cnn_encoder,embeddings,transformer,hybrid}.py</span>
+    <span>Repo · github.com/Nitish05/ARC-AGI</span>
+  </footer>
+
+</div>
+</body>
+</html>
