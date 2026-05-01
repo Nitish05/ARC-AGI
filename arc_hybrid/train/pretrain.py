@@ -143,14 +143,18 @@ def main():
     n_params = sum(p.numel() for p in model.parameters())
     print(f"model params: {n_params/1e6:.1f}M")
 
-    # torch.compile gives a meaningful win on H100 by collapsing many small
-    # kernels (this model has lots of them — small CNN + per-cell gathers).
-    # max-autotune-no-cudagraphs picks best kernels per shape without the
-    # CUDA-graphs constraint that breaks dynamic-shape workloads like ours.
+    # torch.compile gives a meaningful win by collapsing many small kernels
+    # (this model has lots of them — small CNN + per-cell gathers). On
+    # Hopper/Blackwell (sm >= 9.0), Inductor's Triton templates often beat
+    # stock cudnn, so max-autotune is worth its long warmup. On Ampere
+    # (A100, sm 8.0), cudnn is mature enough that Triton usually loses,
+    # which makes autotune pure overhead — drop to 'default' there.
     if args.device.startswith("cuda"):
         try:
-            model = torch.compile(model, mode="max-autotune-no-cudagraphs")
-            print("torch.compile: enabled (mode=max-autotune-no-cudagraphs)")
+            cap = torch.cuda.get_device_capability(0)
+            compile_mode = "max-autotune-no-cudagraphs" if cap[0] >= 9 else "default"
+            model = torch.compile(model, mode=compile_mode)
+            print(f"torch.compile: enabled (mode={compile_mode}, sm={cap[0]}.{cap[1]})")
         except Exception as e:
             print(f"torch.compile skipped: {e!r}")
 
