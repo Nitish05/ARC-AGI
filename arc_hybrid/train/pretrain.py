@@ -31,13 +31,14 @@ def gather_tasks(cfg) -> list[Task]:
     """
     # Both arcprize/ARC-AGI-2 and fchollet/ARC-AGI lay out JSONs under <repo>/data/{training,evaluation}.
     # Keep the flattened paths too in case the user copies just the JSON folders.
+    # ARC-AGI-2 evaluation/ is HELD OUT — that is the benchmark we score against in notebook 02,
+    # so training on it would inflate eval accuracy. ARC-AGI-1 eval is fine to use as training
+    # data since we don't score against it.
     arc2 = Path(cfg.data.arc_agi_2_path)
     arc1 = Path(cfg.data.arc_agi_1_path)
     candidates = [
         (arc2 / "data" / "training", "*.json"),
-        (arc2 / "data" / "evaluation", "*.json"),
         (arc2 / "training", "*.json"),
-        (arc2 / "evaluation", "*.json"),
         (arc1 / "data" / "training", "*.json"),
         (arc1 / "data" / "evaluation", "*.json"),
         (arc1 / "training", "*.json"),
