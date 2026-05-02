@@ -65,9 +65,13 @@ def test_prefill_logits_match_no_cache():
     packed = pack_task(task, test_idx=0, include_test_output=True, max_grid=30)
     batch = collate_batch([packed], max_grid=30)
 
+    # collate_batch returns target_mask too (used by the training loss); the
+    # model's forward doesn't take it. Strip before splatting.
+    forward_kwargs = {k: v for k, v in batch.items() if k != "target_mask"}
+
     with torch.no_grad():
-        logits_no = model(**batch)
-        logits_yes, kv = model(**batch, use_cache=True)
+        logits_no = model(**forward_kwargs)
+        logits_yes, kv = model(**forward_kwargs, use_cache=True)
 
     assert torch.allclose(logits_no, logits_yes, atol=1e-5), \
         "use_cache=True prefill diverges from no-cache forward"
