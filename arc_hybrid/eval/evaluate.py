@@ -246,6 +246,9 @@ def evaluate_split(
     out_dir: str | Path = "runs/eval",
     tag: str = "ttt_off",
 ) -> dict:
+    import time
+    from tqdm.auto import tqdm
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -256,7 +259,9 @@ def evaluate_split(
     per_task: dict[str, dict] = {}
     n_correct = 0
     n_total = 0
-    for task in tasks:
+    pbar = tqdm(tasks, desc=tag, leave=True, dynamic_ncols=True)
+    for task in pbar:
+        t0 = time.time()
         gt = task.test[0].output
         if use_ttt:
             adapter = train_ttt_adapter(model, task, max_grid=max_grid, device=device, **(ttt_kwargs or {}))
@@ -277,6 +282,7 @@ def evaluate_split(
             "correct": correct,
             "shape_a1": None if a1 is None else list(a1.shape),
             "shape_a2": None if a2 is None else list(a2.shape),
+            "wall_s": round(time.time() - t0, 2),
         }
         submission[task.task_id] = [
             {
@@ -284,6 +290,13 @@ def evaluate_split(
                 "attempt_2": [] if a2 is None else a2.astype(int).tolist(),
             }
         ]
+        running_acc = (n_correct / n_total) if n_total else 0.0
+        pbar.set_postfix(
+            acc=f"{running_acc:.3f}",
+            correct=f"{n_correct}/{n_total}",
+            last=f"{per_task[task.task_id]['wall_s']:.1f}s",
+            mark="✓" if correct else "·",
+        )
 
     summary = {
         "tag": tag,
