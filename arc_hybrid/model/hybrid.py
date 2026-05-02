@@ -6,8 +6,19 @@ and produces logits at every sequence position. The hybrid step:
   2. Build the embedding sequence (color/row/col/role/grid-index embeds).
   3. Gather CNN features for color-cell positions, project, add to sequence.
   4. Run causal decoder -> LM head.
+
+KV-cache mode (eval/inference only):
+  When `use_cache=True`, returns `(logits, new_kv_list)`. On the prefill step
+  (`past_kv_list=None`) the call is identical to the no-cache path but also
+  emits per-layer K/V caches. On subsequent decode steps (`past_kv_list` set,
+  L=1), we skip the CNN+gather entirely — the new generated token always has
+  `grid_in_sample=-1` (it's a CNN-blind test-output cell), so the gathered
+  CNN contribution at that position is zero by construction. Only embeddings
+  matter for the new token.
 """
 from __future__ import annotations
+
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -15,7 +26,7 @@ import torch.nn as nn
 from ..data.tokenize import VOCAB_SIZE
 from .cnn_encoder import CNNEncoder
 from .embeddings import TokenEmbeddings
-from .transformer import CausalDecoder
+from .transformer import CausalDecoder, KVList
 
 
 class HybridModel(nn.Module):
@@ -64,29 +75,43 @@ class HybridModel(nn.Module):
         pad_mask: torch.Tensor,         # [B, L]
         grids: torch.Tensor,            # [B, G, max_grid, max_grid]
         grid_sizes: torch.Tensor | None = None,  # [B, G, 2]; unused (kept for API symmetry)
-    ) -> torch.Tensor:
+        *,
+        use_cache: bool = False,
+        past_kv_list: Optional[KVList] = None,
+    ):
         del grid_sizes  # padded grid is fine; CNN over PAD is masked by cell_mask later
-        B, G, H, W = grids.shape
-        flat = grids.reshape(B * G, H, W)
-        cnn_feats = self.cnn(flat)                                # [B*G, C, H, W]
-        cnn_feats = cnn_feats.permute(0, 2, 3, 1).contiguous()     # [B*G, H, W, C]
-        cnn_feats = cnn_feats.view(B, G, H, W, -1)                 # [B, G, H, W, C]
 
-        b_idx = torch.arange(B, device=grids.device).view(B, 1).expand_as(grid_in_sample)
-        gi = grid_in_sample.clamp(min=0)
-        ri = row_ids.clamp(max=H - 1)
-        ci = col_ids.clamp(max=W - 1)
-        gathered = cnn_feats[b_idx, gi, ri, ci]                    # [B, L, C]
-        # Mask out positions that aren't real CNN-visible cells: pad/specials AND
-        # cells whose grid was hidden from the CNN (e.g. predicted test output).
-        cnn_lookup = cell_mask & (grid_in_sample >= 0)
-        gathered = gathered * cnn_lookup.unsqueeze(-1).to(gathered.dtype)
+        is_decode_step = use_cache and past_kv_list is not None and token_ids.size(1) == 1
 
-        x = self.embeddings(token_ids, row_ids, col_ids, role_ids, grid_in_sample)
-        x = x + self.cnn_to_d(gathered)
+        if is_decode_step:
+            # New generated tokens are CNN-blind by construction (grid_in_sample=-1),
+            # so we skip the CNN+gather pass entirely. Embeddings only.
+            x = self.embeddings(token_ids, row_ids, col_ids, role_ids, grid_in_sample)
+        else:
+            B, G, H, W = grids.shape
+            flat = grids.reshape(B * G, H, W)
+            cnn_feats = self.cnn(flat)                                # [B*G, C, H, W]
+            cnn_feats = cnn_feats.permute(0, 2, 3, 1).contiguous()     # [B*G, H, W, C]
+            cnn_feats = cnn_feats.view(B, G, H, W, -1)                 # [B, G, H, W, C]
 
-        h = self.transformer(x, pad_mask=pad_mask)
-        return self.lm_head(h)
+            b_idx = torch.arange(B, device=grids.device).view(B, 1).expand_as(grid_in_sample)
+            gi = grid_in_sample.clamp(min=0)
+            ri = row_ids.clamp(max=H - 1)
+            ci = col_ids.clamp(max=W - 1)
+            gathered = cnn_feats[b_idx, gi, ri, ci]                    # [B, L, C]
+            cnn_lookup = cell_mask & (grid_in_sample >= 0)
+            gathered = gathered * cnn_lookup.unsqueeze(-1).to(gathered.dtype)
+
+            x = self.embeddings(token_ids, row_ids, col_ids, role_ids, grid_in_sample)
+            x = x + self.cnn_to_d(gathered)
+
+        h, new_kv_list = self.transformer(
+            x, pad_mask=pad_mask, past_kv_list=past_kv_list, use_cache=use_cache
+        )
+        logits = self.lm_head(h)
+        if use_cache:
+            return logits, new_kv_list
+        return logits
 
 
 def build_hybrid_from_config(cfg) -> HybridModel:

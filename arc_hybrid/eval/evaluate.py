@@ -36,9 +36,21 @@ def greedy_decode(
     max_grid: int = 30,
     device: str = "cuda",
     max_new_tokens: int | None = None,
+    use_kv_cache: bool = True,
 ) -> np.ndarray | None:
-    """Re-encode-each-step greedy decoding. Slow (quadratic) but simple. KV cache
-    is the natural follow-up if eval-time becomes a bottleneck."""
+    """KV-cached greedy decoding.
+
+    Prefill: one full forward pass over the prefix to populate the per-layer
+    K/V cache. Subsequent steps feed only the newly-generated single token,
+    reusing cached past K/V so attention costs O(L) instead of O(L^2).
+
+    The CNN runs only on the prefill step (the only call that has cells with
+    grid_in_sample>=0). Generated tokens are CNN-blind by construction
+    (grid_in_sample=-1), so the decode-step path skips the CNN entirely.
+
+    Set use_kv_cache=False to fall back to the legacy re-encode-each-step path
+    (e.g. for parity tests).
+    """
     model.eval()
     packed = pack_task(task, test_idx=test_idx, include_test_output=False, max_grid=max_grid)
 
@@ -57,6 +69,100 @@ def greedy_decode(
     if max_new_tokens is None:
         max_new_tokens = max_grid * (max_grid + 1) + 1
 
+    if not use_kv_cache:
+        return _legacy_greedy_decode(
+            model, packed, grids_t, grid_sizes_t,
+            tok, row, col, role, gis, cmask,
+            rows, cur_r, cur_c, max_grid, device, max_new_tokens,
+        )
+
+    # ---- KV-cache path ----
+    L = len(tok)
+    prefill_batch = {
+        "token_ids": torch.tensor([tok], dtype=torch.long, device=device),
+        "row_ids": torch.tensor([row], dtype=torch.long, device=device),
+        "col_ids": torch.tensor([col], dtype=torch.long, device=device),
+        "role_ids": torch.tensor([role], dtype=torch.long, device=device),
+        "grid_in_sample": torch.tensor([gis], dtype=torch.long, device=device),
+        "cell_mask": torch.tensor([cmask], dtype=torch.bool, device=device),
+        "pad_mask": torch.ones(1, L, dtype=torch.bool, device=device),
+        "grids": grids_t,
+        "grid_sizes": grid_sizes_t,
+    }
+    logits, kv_cache = model(**prefill_batch, use_cache=True)
+    next_tok = int(logits[0, -1].argmax().item())
+
+    def _emit_and_step(nt: int) -> bool:
+        """Update tok/row/col/role/gis/cmask and the rows accumulator.
+        Returns True if decoding should stop."""
+        nonlocal cur_r, cur_c
+        if nt == EOG:
+            return True
+        if nt == EOR:
+            tok.append(EOR); row.append(cur_r); col.append(cur_c); role.append(ROLE_SPECIAL)
+            gis.append(-1); cmask.append(False)
+            cur_r += 1
+            cur_c = 0
+            if cur_r >= max_grid:
+                return True
+            rows.append([])
+            return False
+        if 0 <= nt <= 9:
+            tok.append(nt); row.append(cur_r); col.append(cur_c); role.append(ROLE_TEST_OUT)
+            gis.append(-1); cmask.append(True)
+            rows[-1].append(nt)
+            cur_c += 1
+            if cur_c >= max_grid:
+                tok.append(EOR); row.append(cur_r); col.append(cur_c); role.append(ROLE_SPECIAL)
+                gis.append(-1); cmask.append(False)
+                cur_r += 1
+                cur_c = 0
+                if cur_r >= max_grid:
+                    return True
+                rows.append([])
+            return False
+        return True  # unexpected token id; stop
+
+    for _ in range(max_new_tokens):
+        stop = _emit_and_step(next_tok)
+        if stop:
+            break
+        # Build a single-token forward for the just-emitted token.
+        last = -1
+        step_batch = {
+            "token_ids": torch.tensor([[tok[last]]], dtype=torch.long, device=device),
+            "row_ids": torch.tensor([[row[last]]], dtype=torch.long, device=device),
+            "col_ids": torch.tensor([[col[last]]], dtype=torch.long, device=device),
+            "role_ids": torch.tensor([[role[last]]], dtype=torch.long, device=device),
+            "grid_in_sample": torch.tensor([[gis[last]]], dtype=torch.long, device=device),
+            "cell_mask": torch.tensor([[cmask[last]]], dtype=torch.bool, device=device),
+            "pad_mask": torch.ones(1, 1, dtype=torch.bool, device=device),
+            "grids": grids_t,             # unused on decode step but keeps API stable
+            "grid_sizes": grid_sizes_t,
+        }
+        logits, kv_cache = model(**step_batch, use_cache=True, past_kv_list=kv_cache)
+        next_tok = int(logits[0, -1].argmax().item())
+
+    while rows and not rows[-1]:
+        rows.pop()
+    if not rows:
+        return None
+    W = max(len(r) for r in rows)
+    if W == 0:
+        return None
+    out = np.zeros((len(rows), W), dtype=np.int8)
+    for ri, r in enumerate(rows):
+        out[ri, : len(r)] = r
+    return out
+
+
+def _legacy_greedy_decode(
+    model, packed, grids_t, grid_sizes_t,
+    tok, row, col, role, gis, cmask,
+    rows, cur_r, cur_c, max_grid, device, max_new_tokens,
+):
+    """Re-encode-each-step greedy decoding. Slow (quadratic) but kept for parity
+    testing against the cached path."""
     for _ in range(max_new_tokens):
         L = len(tok)
         b = {
@@ -72,7 +178,6 @@ def greedy_decode(
         }
         logits = model(**b)
         next_tok = int(logits[0, -1].argmax().item())
-
         if next_tok == EOG:
             break
         if next_tok == EOR:
@@ -99,7 +204,6 @@ def greedy_decode(
                 rows.append([])
             continue
         break
-
     while rows and not rows[-1]:
         rows.pop()
     if not rows:
